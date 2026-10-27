@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    function willBeDocOwner() {
+      return isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    function ownershipUnchanged() {
+      return !('userId' in request.resource.data) || 
+             request.resource.data.userId == resource.data.userId;
+    }
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 1. users: user profile documents keyed by Auth UID
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && request.resource.data.uid == userId;
+      allow update: if isOwner(userId) && 
+                       request.resource.data.uid == resource.data.uid;
+      allow delete: if isOwner(userId);
+    }
+
+    // 2. resumes: metadata for uploaded resumes
+    match /resumes/{resumeId} {
+      allow read: if isDocOwner();
+      allow create: if willBeDocOwner();
+      allow update: if isDocOwner() && ownershipUnchanged();
+      allow delete: if isDocOwner();
+    }
+
+    // 3. resumeAnalyses: AI parsed resume analyses & scores
+    match /resumeAnalyses/{analysisId} {
+      allow read: if isDocOwner();
+      allow create: if willBeDocOwner();
+      allow update: if isDocOwner() && ownershipUnchanged();
+      allow delete: if isDocOwner();
+    }
+
+    // 4. jobs: job postings directory
+    // Readable by all authenticated users; writable only by administrative / backend systems
+    match /jobs/{jobId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Only manageable via Firebase Admin SDK / n8n verified ingest
+    }
+
+    // 5. jobMatches: user-specific match evaluations between a resume and job
+    match /jobMatches/{matchId} {
+      allow read: if isDocOwner();
+      allow create: if willBeDocOwner();
+      allow update: if isDocOwner() && ownershipUnchanged();
+      allow delete: if isDocOwner();
+    }
+
+    // 6. savedJobs: user bookmarked jobs
+    match /savedJobs/{savedJobId} {
+      allow read: if isDocOwner();
+      allow create: if willBeDocOwner();
+      allow update: if isDocOwner() && ownershipUnchanged();
+      allow delete: if isDocOwner();
+    }
+
+    // 7. applications: user job applications and pipeline status
+    match /applications/{applicationId} {
+      allow read: if isDocOwner();
+      allow create: if willBeDocOwner();
+      allow update: if isDocOwner() && ownershipUnchanged();
+      allow delete: if isDocOwner();
+    }
+
+    // 8. agentRuns: tracking background autonomous agent executions
+    match /agentRuns/{runId} {
+      allow read: if isDocOwner();
+      allow create: if willBeDocOwner();
+      allow update: if isDocOwner() && ownershipUnchanged();
+      allow delete: if isDocOwner();
+    }
+
+    // 9. notifications: user notifications and alert items
+    match /notifications/{notificationId} {
+      allow read: if isDocOwner();
+      allow create: if willBeDocOwner();
+      allow update: if isDocOwner() && ownershipUnchanged();
+      allow delete: if isDocOwner();
+    }
+  }
+}

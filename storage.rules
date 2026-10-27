@@ -1,0 +1,44 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidResumeFile() {
+      // Limit to 10MB
+      return request.resource.size < 10 * 1024 * 1024 &&
+        // Allow valid document content-types
+        (request.resource.contentType.matches('application/pdf') ||
+         request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.wordprocessingml.document') ||
+         request.resource.contentType.matches('application/msword') ||
+         request.resource.contentType.matches('text/plain'));
+    }
+
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Secure resume file uploads isolated by user UID:
+    // Path: /resumes/{userId}/{fileName}
+    match /resumes/{userId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidResumeFile();
+      allow delete: if isOwner(userId);
+    }
+
+    // Nested resume path by resume ID:
+    // Path: /resumes/{userId}/{resumeId}/{fileName}
+    match /resumes/{userId}/{resumeId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidResumeFile();
+      allow delete: if isOwner(userId);
+    }
+  }
+}
