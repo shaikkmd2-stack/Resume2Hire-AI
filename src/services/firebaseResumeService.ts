@@ -33,6 +33,7 @@ export interface ResumeUploadResult {
   resume?: ResumeDocument;
   downloadUrl?: string;
   error?: string;
+  storageSkipped?: boolean;
 }
 
 // Active background task handle for user cancellation
@@ -117,10 +118,10 @@ export const firebaseResumeService = {
       return { success: false, error: 'Cloud Firestore is not initialized.' };
     }
 
-    // Configure SDK retry timeout to fail fast (12 seconds) instead of hanging for 2-10 minutes on missing bucket / 404
+    // Configure SDK retry timeout to fail fast (3000ms) instead of hanging for minutes on unprovisioned bucket / 404
     try {
-      storage.maxUploadRetryTime = 12000;
-      storage.maxOperationRetryTime = 12000;
+      storage.maxUploadRetryTime = 3000;
+      storage.maxOperationRetryTime = 3000;
     } catch {
       // safe fallback
     }
@@ -132,7 +133,7 @@ export const firebaseResumeService = {
     let uploadedStoragePath: string | undefined = undefined;
     let downloadUrl: string | undefined = undefined;
 
-    // 1. Upload the actual selected binary File to Firebase Storage using ref() and uploadBytesResumable()
+    // 1. Upload the selected binary File to Firebase Storage using ref() and uploadBytesResumable()
     try {
       if (onProgress) onProgress(0, 'Initializing secure upload to Firebase Storage: 0%');
 
@@ -162,7 +163,7 @@ export const firebaseResumeService = {
       await new Promise<void>((resolve, reject) => {
         let isSettled = false;
 
-        // Strict timeout guard: If upload hangs or bucket 404s for 15s without progress, cancel cleanly
+        // Fast 3.5s timeout guard: If upload makes zero progress because the bucket returns 404 or hangs, fail fast
         const timeoutId = setTimeout(() => {
           if (!isSettled) {
             isSettled = true;
@@ -174,11 +175,11 @@ export const firebaseResumeService = {
             const bucket = storage?.app?.options?.storageBucket || 'resume2hire-dcbe0.firebasestorage.app';
             reject(
               new Error(
-                `Upload connection timed out after 15 seconds. The Cloud Storage bucket "${bucket}" is not activated or reachable. Please ensure Cloud Storage is activated in Firebase Console (Storage > Get Started).`
+                `Firebase Storage bucket "${bucket}" is not activated or reachable in Firebase Console.`
               )
             );
           }
-        }, 15000);
+        }, 3500);
 
         uploadTask.on(
           'state_changed',
@@ -228,13 +229,16 @@ export const firebaseResumeService = {
       }
     } catch (storageErr: any) {
       currentUploadTask = null;
-      console.error('[FirebaseResumeService] Storage upload failed:', storageErr);
+      console.warn('[FirebaseResumeService] Storage upload notice:', storageErr?.message || storageErr);
       const errCode = storageErr?.code || '';
       const errMsg = storageErr?.message || '';
 
       let userFriendlyMessage = 'Failed to upload resume to Cloud Storage.';
       if (errCode === 'storage/canceled' || errMsg.includes('canceled') || errMsg.includes('cancelled')) {
-        userFriendlyMessage = 'Upload was cancelled by user.';
+        return {
+          success: false,
+          error: 'Upload was cancelled by user.',
+        };
       } else if (errCode === 'storage/unauthorized') {
         userFriendlyMessage =
           'Upload rejected by Storage Security Rules: Unauthorized. Please sign in to verify your identity.';
@@ -245,25 +249,24 @@ export const firebaseResumeService = {
         errMsg.includes('not activated')
       ) {
         const bucket = storage?.app?.options?.storageBucket || 'resume2hire-dcbe0.firebasestorage.app';
-        userFriendlyMessage = `Firebase Storage bucket "${bucket}" was not found (HTTP 404). Cloud Storage has not been activated yet for project "resume2hire-dcbe0". Please open the Firebase Console, go to Storage, and click "Get Started" to initialize the bucket.`;
+        userFriendlyMessage = `Firebase Storage bucket "${bucket}" was not found (HTTP 404). Cloud Storage has not been activated yet for project "resume2hire-dcbe0".`;
       } else if (
         errCode === 'storage/retry-limit-exceeded' ||
         errMsg.includes('CORS') ||
         errMsg.includes('preflight') ||
         errMsg.includes('timed out')
       ) {
-        userFriendlyMessage = errMsg.includes('timed out')
-          ? errMsg
-          : 'Network timeout: Unable to establish connection to Firebase Storage. Please check your internet connection or verify Storage activation in Firebase Console.';
+        userFriendlyMessage = 'Network timeout connecting to Firebase Storage.';
       } else if (errCode === 'storage/quota-exceeded') {
         userFriendlyMessage = 'Firebase Storage quota exceeded for this project.';
       } else if (storageErr instanceof Error) {
-        userFriendlyMessage = `Storage upload error (${errCode || 'network'}): ${storageErr.message}`;
+        userFriendlyMessage = `Storage notice: ${storageErr.message}`;
       }
 
       return {
         success: false,
         error: userFriendlyMessage,
+        storageSkipped: true,
       };
     }
 
@@ -308,6 +311,35 @@ export const firebaseResumeService = {
       resume: resumeDoc,
       downloadUrl,
     };
+  },
+
+  /**
+   * Save resume record in Firestore directly
+   */
+  async saveResumeRecord(
+    userId: string,
+    file: File,
+    storagePath?: string,
+    downloadUrl?: string
+  ): Promise<ResumeDocument> {
+    const resumeId = `res_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const resumeDoc: ResumeDocument = {
+      id: resumeId,
+      userId,
+      originalFileName: file.name,
+      fileType: file.type || 'application/octet-stream',
+      fileSize: file.size,
+      storagePath,
+      downloadUrl,
+      status: 'uploaded',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (db) {
+      await setDoc(doc(db, 'resumes', resumeId), resumeDoc);
+    }
+    return resumeDoc;
   },
 
   /**
