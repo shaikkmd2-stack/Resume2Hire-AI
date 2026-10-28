@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
 import { ToastContainer } from '../common/ToastContainer';
+import { FloatingCareerAgent } from '../agent/FloatingCareerAgent';
 
 export const AppLayout: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -22,6 +23,9 @@ export const AppLayout: React.FC = () => {
           <Outlet />
         </main>
       </div>
+
+      {/* Autonomous Floating Career Assistant */}
+      <FloatingCareerAgent />
 
       {/* Global Interactive Toast Notification Container */}
       <ToastContainer />

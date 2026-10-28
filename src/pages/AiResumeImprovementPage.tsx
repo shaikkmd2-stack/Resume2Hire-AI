@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ImprovementSuggestion } from '../types';
 import { INITIAL_IMPROVEMENTS } from '../services/mockData';
 import { useNotifications } from '../context/NotificationContext';
@@ -30,6 +30,25 @@ export const AiResumeImprovementPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState<string>('');
   const [resetModalOpen, setResetModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (resume.actionableSuggestions && resume.actionableSuggestions.length > 0) {
+      setSuggestions(
+        resume.actionableSuggestions.map((as, idx) => ({
+          id: as.id || `sug_${idx}`,
+          roleContext: resume.targetRole || 'Software Engineer',
+          companyContext: 'Extracted from Resume Content',
+          category: 'ATS Alignment' as const,
+          original: 'Current bullet or section in extracted resume',
+          suggested: as.description || as.title,
+          reason: as.title,
+          scoreGain: as.severity === 'High' ? 3.0 : 1.5,
+          targetKeywords: ['Metrics', 'Impact'],
+          status: 'pending' as const,
+        }))
+      );
+    }
+  }, [resume.id, resume.actionableSuggestions]);
 
   // Compute live score dynamically based on accepted suggestions and real resume score
   const baseScore = resume.overallScore || 80;

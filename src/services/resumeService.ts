@@ -18,6 +18,20 @@ export const resumeService = {
       return activeParsedResume;
     }
 
+    // Check localStorage cache
+    try {
+      const stored = localStorage.getItem('r2h_active_resume');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.filename) {
+          activeParsedResume = parsed;
+          return activeParsedResume;
+        }
+      }
+    } catch {
+      // Safe silence
+    }
+
     if (auth?.currentUser) {
       try {
         const userResumes = await firebaseResumeService.getUserResumes(auth.currentUser.uid);
@@ -49,6 +63,11 @@ export const resumeService = {
               skillGaps: analysis.missingSkills || [],
               actionableSuggestions: (analysis.suggestions as any) || [],
             };
+            try {
+              localStorage.setItem('r2h_active_resume', JSON.stringify(activeParsedResume));
+            } catch {
+              // ignore
+            }
             return activeParsedResume;
           }
         }
@@ -67,39 +86,15 @@ export const resumeService = {
     file: File,
     onProgress?: (progress: number, stepName: string) => void
   ): Promise<{ success: boolean; data?: ResumeData; error?: string }> {
-    // 1. Check user authentication (Storage Security Rules enforce isOwner(userId))
-    if (!auth?.currentUser) {
-      return {
-        success: false,
-        error: 'Authentication required: Please sign in before uploading your resume to Cloud Storage.',
-      };
-    }
-    const userId = auth.currentUser.uid;
-
-    // 2. File type and size validation
+    // 1. File type and size validation
     const validation = firebaseResumeService.validateFile(file);
     if (!validation.valid) {
       return { success: false, error: validation.error };
     }
 
     try {
-      // 3. STEP 1: Upload the actual File to Firebase Storage FIRST
-      if (onProgress) onProgress(10, 'Initiating secure document upload to Firebase Storage...');
-      const uploadRes = await firebaseResumeService.uploadResume(userId, file, (pct, step) => {
-        // Map upload progress into the 10% - 50% range
-        const scaledProgress = Math.round(10 + (pct / 100) * 40);
-        if (onProgress) onProgress(scaledProgress, step);
-      });
-
-      if (!uploadRes.success || !uploadRes.resume) {
-        return {
-          success: false,
-          error: uploadRes.error || 'Failed to upload document to Firebase Storage.',
-        };
-      }
-
-      // 4. STEP 2: START RESUME ANALYSIS ONLY AFTER UPLOAD SUCCEEDS
-      if (onProgress) onProgress(55, 'Upload verified. Extracting readable text from document binary...');
+      // 2. STEP 1: Extract readable text directly from document binary
+      if (onProgress) onProgress(20, 'Extracting readable text from document binary...');
       const extracted = await documentParser.extractText(file);
 
       // Detect empty or scanned files without selectable text
@@ -107,31 +102,86 @@ export const resumeService = {
         return {
           success: false,
           error:
-            'Empty or unreadable document: No selectable text could be found. Please ensure your PDF or DOCX file contains selectable text rather than a flattened image.',
+            'Empty or unreadable document: No selectable text could be found. Please ensure your PDF or DOCX file contains selectable text rather than a flattened image, or use the "Paste Text Fallback" option.',
         };
       }
 
-      if (onProgress) onProgress(75, 'Evaluating technical competencies, experience tokens, and metrics...');
+      // 3. STEP 2: Deterministic ATS scoring & structured extraction
+      if (onProgress) onProgress(50, 'Evaluating technical competencies, experience tokens, and metrics...');
       const structuredAnalysis: StructuredResumeAnalysis = documentParser.analyzeResumeContent(
         extracted.text,
         file.name
       );
 
       const resumeData = documentParser.mapToResumeData(structuredAnalysis, file.name, file.size);
-      resumeData.id = uploadRes.resume.id;
+      const generatedId = `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      resumeData.id = generatedId;
 
-      if (onProgress) onProgress(90, 'Dispatching payload to AI workflow boundary...');
-      await n8nBoundary.triggerResumeAnalysis({
-        userId,
-        resumeId: uploadRes.resume.id,
-        storagePath: uploadRes.resume.storagePath,
-        targetRole: structuredAnalysis.targetRole,
-        file,
-        rawText: extracted.text,
-        localAnalysis: structuredAnalysis,
-      });
+      // 4. STEP 3: Gracefully upload to Firebase Storage & Firestore if user is authenticated
+      const userId = auth?.currentUser?.uid;
+      let remoteResumeId: string | null = null;
+      let remoteStoragePath: string | undefined = undefined;
 
+      if (userId) {
+        try {
+          if (onProgress) onProgress(75, 'Syncing document with Firebase Cloud Storage & Firestore...');
+          const uploadRes = await firebaseResumeService.uploadResume(userId, file, (pct, step) => {
+            const scaledProgress = Math.round(75 + (pct / 100) * 15);
+            if (onProgress) onProgress(scaledProgress, step);
+          });
+
+          if (uploadRes.success && uploadRes.resume) {
+            remoteResumeId = uploadRes.resume.id;
+            remoteStoragePath = uploadRes.resume.storagePath;
+            resumeData.id = remoteResumeId;
+
+            // Persist analysis document to Firestore
+            try {
+              await firebaseAnalysisService.saveAnalysis(userId, remoteResumeId, {
+                score: structuredAnalysis.overallScore,
+                breakdown: structuredAnalysis.breakdown,
+                skills: structuredAnalysis.skills,
+                experience: structuredAnalysis.experience,
+                education: structuredAnalysis.education,
+                strengths: structuredAnalysis.strengths,
+                missingSkills: structuredAnalysis.missingSkills,
+                suggestions: structuredAnalysis.suggestions,
+              });
+            } catch (firestoreErr) {
+              console.warn('[ResumeService] Firestore analysis save non-fatal error:', firestoreErr);
+            }
+          }
+        } catch (uploadErr) {
+          console.warn('[ResumeService] Cloud upload bypassed or non-fatal:', uploadErr);
+        }
+      } else {
+        if (onProgress) onProgress(80, 'Parsed client-side for executive session...');
+      }
+
+      // 5. STEP 4: Asynchronously notify n8n AI webhook boundary
+      try {
+        if (onProgress) onProgress(92, 'Dispatching payload to AI workflow boundary...');
+        await n8nBoundary.triggerResumeAnalysis({
+          userId: userId || 'guest_session',
+          resumeId: remoteResumeId || generatedId,
+          storagePath: remoteStoragePath || `local/${file.name}`,
+          targetRole: structuredAnalysis.targetRole,
+          file,
+          rawText: extracted.text,
+          localAnalysis: structuredAnalysis,
+        });
+      } catch (n8nErr) {
+        console.warn('[ResumeService] n8n boundary dispatch notification non-fatal:', n8nErr);
+      }
+
+      // 6. STEP 5: Cache active resume in memory and localStorage for seamless cross-page persistence
       activeParsedResume = resumeData;
+      try {
+        localStorage.setItem('r2h_active_resume', JSON.stringify(resumeData));
+      } catch {
+        // Safe silence
+      }
+
       if (onProgress) onProgress(100, 'Analysis complete. Extracted factual profile from uploaded resume.');
 
       return {
@@ -160,6 +210,11 @@ export const resumeService = {
       const structuredAnalysis = documentParser.analyzeResumeContent(rawText, 'Pasted_Resume_Text.txt');
       const resumeData = documentParser.mapToResumeData(structuredAnalysis, 'Pasted_Resume_Text.txt', rawText.length);
       activeParsedResume = resumeData;
+      try {
+        localStorage.setItem('r2h_active_resume', JSON.stringify(resumeData));
+      } catch {
+        // Safe silence
+      }
 
       return {
         success: true,

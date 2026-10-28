@@ -14,10 +14,10 @@ export const HomePage: React.FC = () => {
     clearUploadError();
     const success = await uploadResumeFile(file);
     if (success) {
-      showToast('Resume uploaded to Cloud Storage and parsed successfully!', 'success');
+      showToast('Resume parsed and analyzed successfully!', 'success');
       navigate('/resume-analysis');
     } else {
-      showToast('Resume upload failed. Please review error details.', 'error');
+      showToast('Resume parsing failed. Please inspect the details below.', 'error');
     }
   };
 
@@ -102,7 +102,7 @@ export const HomePage: React.FC = () => {
                       Browse Files
                       <input
                         type="file"
-                        accept=".pdf,.docx,.doc"
+                        accept=".pdf,.docx,.doc,.txt"
                         className="hidden"
                         onChange={(e) => {
                           if (e.target.files && e.target.files[0]) {

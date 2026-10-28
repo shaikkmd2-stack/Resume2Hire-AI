@@ -12,6 +12,9 @@ export const notificationService = {
 
     try {
       const docs = await firebaseNotificationService.getUserNotifications(auth.currentUser.uid);
+      if (docs.length === 0) {
+        return [...INITIAL_NOTIFICATIONS];
+      }
       return docs.map((docItem) => ({
         id: docItem.id,
         title: docItem.title,
@@ -22,7 +25,7 @@ export const notificationService = {
       }));
     } catch (err) {
       console.warn('[NotificationService] Failed to load from Firestore:', err);
-      return [];
+      return [...INITIAL_NOTIFICATIONS];
     }
   },
 

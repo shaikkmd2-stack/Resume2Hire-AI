@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ResumeProvider } from './context/ResumeContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { AgentProvider } from './context/AgentContext';
 
 // Layouts
 import { AppLayout } from './components/layout/AppLayout';
@@ -48,31 +49,33 @@ export const App: React.FC = () => {
       <AuthProvider>
         <ResumeProvider>
           <NotificationProvider>
-            <Routes>
-              {/* Public Marketing & Auth Layout */}
-              <Route element={<PublicLayout />}>
-                <Route path="/" element={<HomePage />} />
-                <Route path="/home" element={<HomePage />} />
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/signup" element={<SignUpPage />} />
-                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-              </Route>
+            <AgentProvider>
+              <Routes>
+                {/* Public Marketing & Auth Layout */}
+                <Route element={<PublicLayout />}>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/home" element={<HomePage />} />
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/signup" element={<SignUpPage />} />
+                  <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                </Route>
 
-              {/* Authenticated Dashboard & Tooling Layout */}
-              <Route element={<AppLayout />}>
-                <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/resume-analysis" element={<ResumeAnalysisPage />} />
-                <Route path="/jobs" element={<JobRecommendationsPage />} />
-                <Route path="/jobs/:id" element={<JobDetailsPage />} />
-                <Route path="/ai-resume-improvement" element={<AiResumeImprovementPage />} />
-                <Route path="/applications" element={<ApplicationTrackerPage />} />
-                <Route path="/agent-activity" element={<AiAgentActivityPage />} />
-                <Route path="/profile" element={<ProfileSettingsPage />} />
-              </Route>
+                {/* Authenticated Dashboard & Tooling Layout */}
+                <Route element={<AppLayout />}>
+                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/resume-analysis" element={<ResumeAnalysisPage />} />
+                  <Route path="/jobs" element={<JobRecommendationsPage />} />
+                  <Route path="/jobs/:id" element={<JobDetailsPage />} />
+                  <Route path="/ai-resume-improvement" element={<AiResumeImprovementPage />} />
+                  <Route path="/applications" element={<ApplicationTrackerPage />} />
+                  <Route path="/agent-activity" element={<AiAgentActivityPage />} />
+                  <Route path="/profile" element={<ProfileSettingsPage />} />
+                </Route>
 
-              {/* Fallback route */}
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
+                {/* Fallback route */}
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </AgentProvider>
           </NotificationProvider>
         </ResumeProvider>
       </AuthProvider>

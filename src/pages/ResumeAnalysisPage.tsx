@@ -20,10 +20,10 @@ export const ResumeAnalysisPage: React.FC = () => {
     if (e.target.files && e.target.files[0]) {
       const success = await uploadResumeFile(e.target.files[0]);
       if (success) {
-        showToast('Resume uploaded to Cloud Storage and successfully parsed!', 'success');
+        showToast('Resume parsed and analyzed successfully!', 'success');
         setShowUploadModal(false);
       } else {
-        showToast('Resume upload failed. Please inspect the error details.', 'error');
+        showToast('Resume parsing failed. Please inspect error details.', 'error');
       }
     }
   };
@@ -36,10 +36,10 @@ export const ResumeAnalysisPage: React.FC = () => {
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const success = await uploadResumeFile(e.dataTransfer.files[0]);
       if (success) {
-        showToast('Resume uploaded to Cloud Storage and successfully parsed!', 'success');
+        showToast('Resume parsed and analyzed successfully!', 'success');
         setShowUploadModal(false);
       } else {
-        showToast('Resume upload failed. Please inspect the error details.', 'error');
+        showToast('Resume parsing failed. Please inspect error details.', 'error');
       }
     }
   };
@@ -478,10 +478,10 @@ export const ResumeAnalysisPage: React.FC = () => {
                 <>
                   <span className="material-symbols-outlined text-[36px] text-primary mb-2">cloud_upload</span>
                   <p className="text-xs font-semibold text-on-surface">Drag & drop your file here</p>
-                  <p className="text-[11px] text-on-surface-variant mt-0.5 mb-4">Supported formats: PDF, DOCX (Max 10 MB)</p>
+                  <p className="text-[11px] text-on-surface-variant mt-0.5 mb-4">Supported formats: PDF, DOCX, TXT (Max 10 MB)</p>
                   <label className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-semibold cursor-pointer shadow-sm">
                     Select File
-                    <input type="file" accept=".pdf,.docx,.doc" onChange={handleFileChange} className="hidden" />
+                    <input type="file" accept=".pdf,.docx,.doc,.txt" onChange={handleFileChange} className="hidden" />
                   </label>
                 </>
               )}

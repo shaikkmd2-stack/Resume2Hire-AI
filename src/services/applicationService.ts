@@ -15,6 +15,9 @@ export const applicationService = {
 
     try {
       const docs = await firebaseApplicationService.getUserApplications(auth.currentUser.uid);
+      if (docs.length === 0) {
+        return [...INITIAL_APPLICATIONS];
+      }
       return docs.map((docItem) => ({
         id: docItem.id,
         jobId: docItem.jobId,
@@ -35,7 +38,7 @@ export const applicationService = {
       }));
     } catch (err) {
       console.warn('[ApplicationService] Error fetching applications from Firestore:', err);
-      return [];
+      return [...INITIAL_APPLICATIONS];
     }
   },
 

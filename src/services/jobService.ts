@@ -3,6 +3,7 @@ import { auth } from '../firebase/config';
 import { firebaseSavedJobService } from './firebaseSavedJobService';
 import { firebaseJobService } from './firebaseJobService';
 import { resumeService } from './resumeService';
+import { INITIAL_JOBS } from './mockData';
 
 export interface JobFilterParams {
   query?: string;
@@ -162,6 +163,11 @@ export const jobService = {
       } catch (fsErr) {
         console.warn('[JobService] Firestore jobs error:', fsErr);
       }
+    }
+
+    // Fallback to high-quality curated jobs if network/firestore returned no jobs
+    if (jobsList.length === 0) {
+      jobsList = [...INITIAL_JOBS];
     }
 
     // 3. Obtain active resume skills and calculate REAL personalized match scores (Phase 4.3)

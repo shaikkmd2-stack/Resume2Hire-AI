@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { PublicHeader } from './PublicHeader';
 import { PublicFooter } from './PublicFooter';
 import { ToastContainer } from '../common/ToastContainer';
+import { FloatingCareerAgent } from '../agent/FloatingCareerAgent';
 
 export const PublicLayout: React.FC = () => {
   return (
@@ -12,6 +13,7 @@ export const PublicLayout: React.FC = () => {
         <Outlet />
       </main>
       <PublicFooter />
+      <FloatingCareerAgent />
       <ToastContainer />
     </div>
   );

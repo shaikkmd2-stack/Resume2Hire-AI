@@ -10,7 +10,7 @@ if (typeof window !== 'undefined') {
       import.meta.url
     ).toString();
   } catch {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version || '6.4.299'}/build/pdf.worker.min.mjs`;
   }
 }
 
@@ -110,11 +110,18 @@ export const documentParser = {
   async extractText(file: File): Promise<ExtractedDocument> {
     const fileName = file.name.toLowerCase();
 
+    // Helper to sanitize extracted printable characters
+    const sanitizeText = (str: string) =>
+      str.replace(/[^\x20-\x7E\t\n\r]/g, ' ').replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, '\n\n').trim();
+
     // 1. PDF Extraction
     if (fileName.endsWith('.pdf') || file.type === 'application/pdf') {
       try {
         const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+        const loadingTask = pdfjsLib.getDocument({
+          data: new Uint8Array(arrayBuffer),
+          useSystemFonts: true,
+        });
         const pdfDoc = await loadingTask.promise;
         const numPages = pdfDoc.numPages;
         const pageTexts: string[] = [];
@@ -131,15 +138,35 @@ export const documentParser = {
         const fullText = pageTexts.join('\n\n').trim();
         const wordCount = fullText ? fullText.split(/\s+/).filter(Boolean).length : 0;
 
-        return {
-          text: fullText,
-          pageCount: numPages,
-          wordCount,
-        };
+        if (fullText.length >= 40) {
+          return {
+            text: fullText,
+            pageCount: numPages,
+            wordCount,
+          };
+        }
       } catch (pdfErr) {
-        console.error('[DocumentParser] PDF parsing error:', pdfErr);
-        throw new Error('Unable to extract text from this PDF file. It may be password-protected or corrupt.');
+        console.warn('[DocumentParser] PDF.js extraction encountered an issue, trying raw text fallback:', pdfErr);
       }
+
+      // Fallback: try raw binary text stream extraction in case PDF.js worker was blocked
+      try {
+        const raw = await file.text();
+        const clean = sanitizeText(raw);
+        if (clean.length > 50) {
+          return {
+            text: clean,
+            pageCount: 1,
+            wordCount: clean.split(/\s+/).filter(Boolean).length,
+          };
+        }
+      } catch {
+        // Safe silence
+      }
+
+      throw new Error(
+        'Unable to extract selectable text from this PDF file. It may be password-protected or contain only scanned images. You can also use the "Paste Text Fallback" option.'
+      );
     }
 
     // 2. DOCX Extraction
@@ -157,23 +184,23 @@ export const documentParser = {
         };
       } catch (docxErr) {
         console.error('[DocumentParser] DOCX extraction error:', docxErr);
-        throw new Error('Unable to extract text from this DOCX document.');
+        throw new Error('Unable to extract text from this DOCX document. Please verify it is a valid Word document.');
       }
     }
 
-    // 3. Plain Text / Markdown / Fallback
+    // 3. Legacy DOC binary or Plain Text / Markdown / Fallback
     try {
       const text = await file.text();
-      const trimmed = text.trim();
-      const wordCount = trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
+      const sanitized = sanitizeText(text);
+      const wordCount = sanitized ? sanitized.split(/\s+/).filter(Boolean).length : 0;
       return {
-        text: trimmed,
+        text: sanitized,
         pageCount: 1,
         wordCount,
       };
     } catch (txtErr) {
       console.error('[DocumentParser] Text file read error:', txtErr);
-      throw new Error('Could not read the provided file.');
+      throw new Error('Could not read the provided file. Please try pasting the resume text directly.');
     }
   },
 

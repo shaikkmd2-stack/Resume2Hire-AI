@@ -103,9 +103,20 @@ export const firebaseResumeService = {
     // 1. Upload the actual selected binary File to Firebase Storage using ref() and uploadBytesResumable()
     try {
       if (onProgress) onProgress(10, 'Initiating secure document upload to Firebase Storage...');
+      const resolvedContentType =
+        (file.type && file.type !== 'application/octet-stream')
+          ? file.type
+          : file.name.toLowerCase().endsWith('.pdf')
+          ? 'application/pdf'
+          : file.name.toLowerCase().endsWith('.docx')
+          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : file.name.toLowerCase().endsWith('.doc')
+          ? 'application/msword'
+          : 'text/plain';
+
       const storageRef = ref(storage, storagePath);
       const uploadTask = uploadBytesResumable(storageRef, file, {
-        contentType: file.type || 'application/octet-stream',
+        contentType: resolvedContentType,
         customMetadata: {
           userId,
           resumeId,

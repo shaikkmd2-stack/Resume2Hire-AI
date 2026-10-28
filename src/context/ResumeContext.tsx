@@ -17,7 +17,19 @@ interface ResumeContextType {
 const ResumeContext = createContext<ResumeContextType | undefined>(undefined);
 
 export const ResumeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [resume, setResume] = useState<ResumeData>(INITIAL_RESUME_DATA);
+  const [resume, setResume] = useState<ResumeData>(() => {
+    try {
+      const stored = localStorage.getItem('r2h_active_resume');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.filename) return parsed;
+      }
+    } catch {
+      // Safe silence
+    }
+    return INITIAL_RESUME_DATA;
+  });
+
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadStep, setUploadStep] = useState<string>('');
@@ -33,7 +45,7 @@ export const ResumeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setIsUploading(true);
     setUploadError(null);
-    setUploadProgress(0);
+    setUploadProgress(10);
     setUploadStep('Initiating secure parser...');
 
     try {
@@ -44,6 +56,13 @@ export const ResumeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       if (res.success && res.data) {
         setResume(res.data);
+        setUploadProgress(100);
+        setUploadStep('Analysis complete!');
+        try {
+          localStorage.setItem('r2h_active_resume', JSON.stringify(res.data));
+        } catch {
+          // Safe silence
+        }
         return true;
       } else {
         const errorMsg = res.error || 'Failed to upload and parse resume.';
@@ -70,6 +89,12 @@ export const ResumeProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (res.success && res.data) {
         setResume(res.data);
         setUploadProgress(100);
+        setUploadStep('Analysis complete!');
+        try {
+          localStorage.setItem('r2h_active_resume', JSON.stringify(res.data));
+        } catch {
+          // Safe silence
+        }
         return true;
       } else {
         setUploadError(res.error || 'Failed to extract skills from text.');

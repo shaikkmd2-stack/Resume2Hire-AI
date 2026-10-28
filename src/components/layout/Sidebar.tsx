@@ -1,5 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useResume } from '../../context/ResumeContext';
+import { useAuth } from '../../context/AuthContext';
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -7,9 +9,12 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ collapsed = false, onToggleCollapse }) => {
+  const { resume } = useResume();
+  const { user } = useAuth();
+
   const primaryNavItems = [
     { name: 'Dashboard', path: '/dashboard', icon: 'dashboard' },
-    { name: 'Resume Analysis', path: '/resume-analysis', icon: 'picture_as_pdf', badge: '92%' },
+    { name: 'Resume Analysis', path: '/resume-analysis', icon: 'picture_as_pdf', badge: `${resume.overallScore}%` },
     { name: 'Job Recommendations', path: '/jobs', icon: 'work', badge: '4 New' },
     { name: 'AI Resume Improvement', path: '/ai-resume-improvement', icon: 'difference' },
     { name: 'Application Tracker', path: '/applications', icon: 'view_kanban', badge: '4' },
@@ -31,7 +36,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed = false, onToggleCol
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
               DAEMON ACTIVE v4.19
             </span>
-            <span className="text-xs font-semibold text-on-surface truncate">Alex Chen · Staff L6+</span>
+            <span className="text-xs font-semibold text-on-surface truncate">
+              {user?.name || 'Executive Candidate'} · {user?.experienceLevel || 'Staff L6+'}
+            </span>
           </div>
         )}
         {onToggleCollapse && (
