@@ -14,6 +14,7 @@ import {
   uploadBytesResumable,
   deleteObject,
   getDownloadURL,
+  UploadTask,
 } from 'firebase/storage';
 import { db, storage } from '../firebase/config';
 import { ResumeDocument } from '../firebase/schema';
@@ -34,7 +35,26 @@ export interface ResumeUploadResult {
   error?: string;
 }
 
+// Active background task handle for user cancellation
+let currentUploadTask: UploadTask | null = null;
+
 export const firebaseResumeService = {
+  /**
+   * Cancel the currently active Storage upload if running
+   */
+  cancelActiveUpload(): boolean {
+    if (currentUploadTask) {
+      try {
+        currentUploadTask.cancel();
+        currentUploadTask = null;
+        return true;
+      } catch (err) {
+        console.warn('[FirebaseResumeService] Error cancelling upload task:', err);
+      }
+    }
+    return false;
+  },
+
   /**
    * Validate file format and size bounds
    */
@@ -44,7 +64,11 @@ export const firebaseResumeService = {
     }
 
     const name = file.name.toLowerCase();
-    const hasValidExtension = name.endsWith('.pdf') || name.endsWith('.docx') || name.endsWith('.doc') || name.endsWith('.txt');
+    const hasValidExtension =
+      name.endsWith('.pdf') ||
+      name.endsWith('.docx') ||
+      name.endsWith('.doc') ||
+      name.endsWith('.txt');
     const hasValidMime = ALLOWED_MIME_TYPES.includes(file.type) || file.type === '';
 
     if (!hasValidExtension && !hasValidMime) {
@@ -93,6 +117,14 @@ export const firebaseResumeService = {
       return { success: false, error: 'Cloud Firestore is not initialized.' };
     }
 
+    // Configure SDK retry timeout to fail fast (12 seconds) instead of hanging for 2-10 minutes on missing bucket / 404
+    try {
+      storage.maxUploadRetryTime = 12000;
+      storage.maxOperationRetryTime = 12000;
+    } catch {
+      // safe fallback
+    }
+
     const resumeId = `res_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const storagePath = `resumes/${userId}/${resumeId}/${cleanFileName}`;
@@ -102,9 +134,10 @@ export const firebaseResumeService = {
 
     // 1. Upload the actual selected binary File to Firebase Storage using ref() and uploadBytesResumable()
     try {
-      if (onProgress) onProgress(10, 'Initiating secure document upload to Firebase Storage...');
+      if (onProgress) onProgress(0, 'Initializing secure upload to Firebase Storage: 0%');
+
       const resolvedContentType =
-        (file.type && file.type !== 'application/octet-stream')
+        file.type && file.type !== 'application/octet-stream'
           ? file.type
           : file.name.toLowerCase().endsWith('.pdf')
           ? 'application/pdf'
@@ -124,46 +157,106 @@ export const firebaseResumeService = {
         },
       });
 
+      currentUploadTask = uploadTask;
+
       await new Promise<void>((resolve, reject) => {
+        let isSettled = false;
+
+        // Strict timeout guard: If upload hangs or bucket 404s for 15s without progress, cancel cleanly
+        const timeoutId = setTimeout(() => {
+          if (!isSettled) {
+            isSettled = true;
+            try {
+              uploadTask.cancel();
+            } catch {
+              // ignore
+            }
+            const bucket = storage?.app?.options?.storageBucket || 'resume2hire-dcbe0.firebasestorage.app';
+            reject(
+              new Error(
+                `Upload connection timed out after 15 seconds. The Cloud Storage bucket "${bucket}" is not activated or reachable. Please ensure Cloud Storage is activated in Firebase Console (Storage > Get Started).`
+              )
+            );
+          }
+        }, 15000);
+
         uploadTask.on(
           'state_changed',
           (snapshot) => {
-            const pct = snapshot.totalBytes > 0
-              ? Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 70) + 10
-              : 25;
+            const bytesTransferred = snapshot.bytesTransferred;
+            const totalBytes = snapshot.totalBytes;
+            // Real percentage based strictly on actual bytes transferred
+            const percent = totalBytes > 0 ? Math.floor((bytesTransferred / totalBytes) * 100) : 0;
+
+            const mbTransferred = (bytesTransferred / (1024 * 1024)).toFixed(2);
+            const mbTotal = (totalBytes / (1024 * 1024)).toFixed(2);
+
             if (onProgress) {
-              const filePct = snapshot.totalBytes > 0
-                ? Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
-                : 0;
-              onProgress(pct, `Uploading to Firebase Storage: ${filePct}%`);
+              onProgress(
+                percent,
+                `Uploading to Firebase Storage: ${percent}% (${mbTransferred} MB / ${mbTotal} MB)`
+              );
             }
           },
           (error) => {
-            console.error('[FirebaseResumeService] Storage upload error:', error);
-            reject(error);
+            if (!isSettled) {
+              isSettled = true;
+              clearTimeout(timeoutId);
+              reject(error);
+            }
           },
-          () => resolve()
+          () => {
+            if (!isSettled) {
+              isSettled = true;
+              clearTimeout(timeoutId);
+              if (onProgress) {
+                onProgress(100, 'Uploading to Firebase Storage: 100% (Upload verified)');
+              }
+              resolve();
+            }
+          }
         );
       });
 
+      currentUploadTask = null;
       uploadedStoragePath = storagePath;
+
       try {
         downloadUrl = await getDownloadURL(storageRef);
-      } catch {
-        // Storage rules may limit client getDownloadURL; storagePath is authoritative
+      } catch (urlErr) {
+        console.warn('[FirebaseResumeService] Download URL retrieval warning (storagePath retained):', urlErr);
       }
     } catch (storageErr: any) {
+      currentUploadTask = null;
       console.error('[FirebaseResumeService] Storage upload failed:', storageErr);
       const errCode = storageErr?.code || '';
       const errMsg = storageErr?.message || '';
 
       let userFriendlyMessage = 'Failed to upload resume to Cloud Storage.';
-      if (errCode === 'storage/unauthorized') {
-        userFriendlyMessage = 'Upload rejected by Storage Security Rules: Unauthorized. Please sign in to verify your identity.';
-      } else if (errCode === 'storage/bucket-not-found' || errMsg.includes('404') || errMsg.includes('Not Found')) {
-        userFriendlyMessage = 'Firebase Storage bucket not found (404). Please ensure Cloud Storage is activated in the Firebase Console for project "resume2hire-dcbe0".';
-      } else if (errCode === 'storage/retry-limit-exceeded' || errMsg.includes('CORS') || errMsg.includes('preflight') || errMsg.includes('network')) {
-        userFriendlyMessage = 'CORS preflight or network error: Unable to complete file upload to Firebase Storage from http://localhost:5173.';
+      if (errCode === 'storage/canceled' || errMsg.includes('canceled') || errMsg.includes('cancelled')) {
+        userFriendlyMessage = 'Upload was cancelled by user.';
+      } else if (errCode === 'storage/unauthorized') {
+        userFriendlyMessage =
+          'Upload rejected by Storage Security Rules: Unauthorized. Please sign in to verify your identity.';
+      } else if (
+        errCode === 'storage/bucket-not-found' ||
+        errMsg.includes('404') ||
+        errMsg.includes('Not Found') ||
+        errMsg.includes('not activated')
+      ) {
+        const bucket = storage?.app?.options?.storageBucket || 'resume2hire-dcbe0.firebasestorage.app';
+        userFriendlyMessage = `Firebase Storage bucket "${bucket}" was not found (HTTP 404). Cloud Storage has not been activated yet for project "resume2hire-dcbe0". Please open the Firebase Console, go to Storage, and click "Get Started" to initialize the bucket.`;
+      } else if (
+        errCode === 'storage/retry-limit-exceeded' ||
+        errMsg.includes('CORS') ||
+        errMsg.includes('preflight') ||
+        errMsg.includes('timed out')
+      ) {
+        userFriendlyMessage = errMsg.includes('timed out')
+          ? errMsg
+          : 'Network timeout: Unable to establish connection to Firebase Storage. Please check your internet connection or verify Storage activation in Firebase Console.';
+      } else if (errCode === 'storage/quota-exceeded') {
+        userFriendlyMessage = 'Firebase Storage quota exceeded for this project.';
       } else if (storageErr instanceof Error) {
         userFriendlyMessage = `Storage upload error (${errCode || 'network'}): ${storageErr.message}`;
       }
@@ -175,7 +268,7 @@ export const firebaseResumeService = {
     }
 
     // 2. Persist metadata in Firestore only AFTER upload succeeds
-    if (onProgress) onProgress(85, 'Registering resume metadata in Firestore...');
+    if (onProgress) onProgress(100, 'Saving resume metadata to Cloud Firestore...');
 
     const resumeDoc: ResumeDocument = {
       id: resumeId,
@@ -184,6 +277,7 @@ export const firebaseResumeService = {
       fileType: file.type || 'application/octet-stream',
       fileSize: file.size,
       storagePath: uploadedStoragePath,
+      downloadUrl,
       status: 'uploaded',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -193,13 +287,21 @@ export const firebaseResumeService = {
       await setDoc(doc(db, 'resumes', resumeId), resumeDoc);
     } catch (dbErr: any) {
       console.error('[FirebaseResumeService] Firestore metadata write error:', dbErr);
+      // Clean up uploaded storage object to prevent orphan / duplicate records on retry
+      if (storage && uploadedStoragePath) {
+        try {
+          await deleteObject(ref(storage, uploadedStoragePath));
+        } catch (cleanupErr) {
+          console.warn('[FirebaseResumeService] Cleanup after Firestore error failed:', cleanupErr);
+        }
+      }
       return {
         success: false,
-        error: `Resume uploaded to Storage, but metadata registration failed: ${dbErr?.message || 'Database error'}`,
+        error: `Resume binary uploaded, but registering document metadata in Firestore failed: ${
+          dbErr?.message || 'Database error'
+        }. Cleaned up file to prevent duplicate records.`,
       };
     }
-
-    if (onProgress) onProgress(100, 'Upload verified and registered in Cloud Storage.');
 
     return {
       success: true,
@@ -214,10 +316,7 @@ export const firebaseResumeService = {
   async getUserResumes(userId: string): Promise<ResumeDocument[]> {
     if (!db || !userId) return [];
     try {
-      const q = query(
-        collection(db, 'resumes'),
-        where('userId', '==', userId)
-      );
+      const q = query(collection(db, 'resumes'), where('userId', '==', userId));
       const snapshot = await getDocs(q);
       return snapshot.docs.map((docSnap) => docSnap.data() as ResumeDocument);
     } catch (err) {
@@ -255,11 +354,7 @@ export const firebaseResumeService = {
     if (!snap.exists() || snap.data()?.userId !== userId) {
       throw new Error('Unauthorized or non-existent resume document.');
     }
-    await setDoc(
-      refDoc,
-      { status, updatedAt: serverTimestamp() },
-      { merge: true }
-    );
+    await setDoc(refDoc, { status, updatedAt: serverTimestamp() }, { merge: true });
   },
 
   /**

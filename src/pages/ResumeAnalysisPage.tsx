@@ -5,7 +5,21 @@ import { ScoreGauge } from '../components/common/ScoreGauge';
 import { Badge } from '../components/common/Badge';
 
 export const ResumeAnalysisPage: React.FC = () => {
-  const { resume, isUploading, uploadProgress, uploadStep, uploadError, uploadResumeFile, parseRawText, clearUploadError } = useResume();
+  const {
+    resume,
+    isUploading,
+    uploadProgress,
+    uploadStep,
+    uploadStage,
+    uploadError,
+    lastSelectedFile,
+    uploadResumeFile,
+    cancelUpload,
+    retryUpload,
+    parseLocalFileFallback,
+    parseRawText,
+    clearUploadError,
+  } = useResume();
   const { showToast } = useNotifications();
 
   const [activeTab, setActiveTab] = useState<'skills' | 'experience' | 'strengths' | 'suggestions'>('skills');
@@ -20,10 +34,10 @@ export const ResumeAnalysisPage: React.FC = () => {
     if (e.target.files && e.target.files[0]) {
       const success = await uploadResumeFile(e.target.files[0]);
       if (success) {
-        showToast('Resume parsed and analyzed successfully!', 'success');
+        showToast('Resume uploaded, parsed, and analyzed successfully!', 'success');
         setShowUploadModal(false);
       } else {
-        showToast('Resume parsing failed. Please inspect error details.', 'error');
+        showToast('Resume upload or analysis failed. Inspect error details.', 'error');
       }
     }
   };
@@ -36,10 +50,10 @@ export const ResumeAnalysisPage: React.FC = () => {
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const success = await uploadResumeFile(e.dataTransfer.files[0]);
       if (success) {
-        showToast('Resume parsed and analyzed successfully!', 'success');
+        showToast('Resume uploaded, parsed, and analyzed successfully!', 'success');
         setShowUploadModal(false);
       } else {
-        showToast('Resume parsing failed. Please inspect error details.', 'error');
+        showToast('Resume upload or analysis failed. Inspect error details.', 'error');
       }
     }
   };
@@ -437,21 +451,65 @@ export const ResumeAnalysisPage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/40 backdrop-blur-xs">
           <div className="bg-surface-container-lowest max-w-lg w-full rounded-2xl p-6 shadow-2xl border border-surface-container-high flex flex-col gap-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-lg font-bold text-on-surface">Upload PDF or DOCX Resume</h3>
-              <button onClick={() => setShowUploadModal(false)} className="text-outline hover:text-on-surface">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[24px] text-primary">cloud_upload</span>
+                <h3 className="font-display text-lg font-bold text-on-surface">Upload PDF or DOCX Resume</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isUploading && setShowUploadModal(false)}
+                disabled={isUploading}
+                className="text-outline hover:text-on-surface disabled:opacity-40"
+              >
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
 
             {uploadError && (
-              <div className="p-3.5 rounded-xl bg-error/10 border border-error/25 flex items-start justify-between gap-3 text-xs text-error text-left">
-                <div className="flex items-start gap-2">
-                  <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">error</span>
-                  <span>{uploadError}</span>
+              <div className="p-4 rounded-xl bg-error/10 border border-error/25 flex flex-col gap-3 text-xs text-left">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2 text-error">
+                    <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">error</span>
+                    <span className="font-medium leading-relaxed">{uploadError}</span>
+                  </div>
+                  <button onClick={clearUploadError} className="text-error/70 hover:text-error shrink-0">
+                    <span className="material-symbols-outlined text-[16px]">close</span>
+                  </button>
                 </div>
-                <button onClick={clearUploadError} className="text-error/70 hover:text-error shrink-0">
-                  <span className="material-symbols-outlined text-[16px]">close</span>
-                </button>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-error/15">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const success = await retryUpload();
+                      if (success) {
+                        showToast('Resume uploaded and parsed successfully!', 'success');
+                        setShowUploadModal(false);
+                      }
+                    }}
+                    className="px-3.5 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold shadow-xs flex items-center gap-1.5 hover:bg-primary/90 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">refresh</span>
+                    Retry Upload
+                  </button>
+
+                  {lastSelectedFile && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const success = await parseLocalFileFallback();
+                        if (success) {
+                          showToast('Resume analyzed using deterministic ATS parser!', 'success');
+                          setShowUploadModal(false);
+                        }
+                      }}
+                      className="px-3.5 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-tertiary">bolt</span>
+                      Continue with Client Analysis
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -467,19 +525,50 @@ export const ResumeAnalysisPage: React.FC = () => {
               }`}
             >
               {isUploading ? (
-                <div className="flex flex-col items-center gap-3 w-full">
-                  <div className="w-10 h-10 rounded-full border-3 border-primary/20 border-t-primary animate-spin"></div>
-                  <span className="text-xs font-semibold text-on-surface">{uploadStep}</span>
-                  <div className="w-full h-2 bg-surface-container rounded-full overflow-hidden">
-                    <div className="h-full bg-primary transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
+                <div className="flex flex-col items-center gap-4 w-full">
+                  {/* Status Badge */}
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container text-xs font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+                    <span className="text-on-surface">
+                      {uploadStage === 'uploading' && 'Stage: Uploading to Firebase Storage'}
+                      {uploadStage === 'saving' && 'Stage: Saving details to Firestore'}
+                      {uploadStage === 'analyzing' && 'Stage: Analyzing resume & ATS metrics'}
+                      {uploadStage === 'completed' && 'Stage: Completed'}
+                      {uploadStage === 'failed' && 'Stage: Upload Interrupted'}
+                    </span>
                   </div>
+
+                  {/* Spinner & Step text */}
+                  <div className="w-10 h-10 rounded-full border-3 border-primary/20 border-t-primary animate-spin"></div>
+                  <div className="flex flex-col items-center gap-1 max-w-sm">
+                    <span className="text-xs font-semibold text-on-surface text-center">{uploadStep}</span>
+                    <span className="text-xs font-mono font-bold text-primary">{uploadProgress}%</span>
+                  </div>
+
+                  {/* Real-time Progress Bar */}
+                  <div className="w-full h-2.5 bg-surface-container rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
+                      style={{ width: `${Math.min(Math.max(uploadProgress, 0), 100)}%` }}
+                    ></div>
+                  </div>
+
+                  {/* Cancel Upload Button */}
+                  <button
+                    type="button"
+                    onClick={cancelUpload}
+                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant hover:bg-surface-container text-xs text-on-surface-variant font-medium transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-error">cancel</span>
+                    Cancel Upload
+                  </button>
                 </div>
               ) : (
                 <>
                   <span className="material-symbols-outlined text-[36px] text-primary mb-2">cloud_upload</span>
                   <p className="text-xs font-semibold text-on-surface">Drag & drop your file here</p>
                   <p className="text-[11px] text-on-surface-variant mt-0.5 mb-4">Supported formats: PDF, DOCX, TXT (Max 10 MB)</p>
-                  <label className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-semibold cursor-pointer shadow-sm">
+                  <label className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-semibold cursor-pointer shadow-sm hover:bg-primary/90 transition-colors">
                     Select File
                     <input type="file" accept=".pdf,.docx,.doc,.txt" onChange={handleFileChange} className="hidden" />
                   </label>

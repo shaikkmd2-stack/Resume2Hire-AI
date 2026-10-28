@@ -36,6 +36,7 @@ export interface ResumeDocument {
   fileType: string;
   fileSize: number;
   storagePath?: string;
+  downloadUrl?: string;
   status: 'uploaded' | 'processing' | 'analyzed' | 'failed';
   createdAt: Timestamp | FieldValue;
   updatedAt: Timestamp | FieldValue;

@@ -5,7 +5,19 @@ import { useNotifications } from '../context/NotificationContext';
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const { uploadResumeFile, isUploading, uploadProgress, uploadStep, uploadError, clearUploadError } = useResume();
+  const {
+    uploadResumeFile,
+    isUploading,
+    uploadProgress,
+    uploadStep,
+    uploadStage,
+    uploadError,
+    lastSelectedFile,
+    cancelUpload,
+    retryUpload,
+    parseLocalFileFallback,
+    clearUploadError,
+  } = useResume();
   const { showToast } = useNotifications();
   const [dragActive, setDragActive] = useState(false);
 
@@ -14,10 +26,10 @@ export const HomePage: React.FC = () => {
     clearUploadError();
     const success = await uploadResumeFile(file);
     if (success) {
-      showToast('Resume parsed and analyzed successfully!', 'success');
+      showToast('Resume uploaded, parsed, and analyzed successfully!', 'success');
       navigate('/resume-analysis');
     } else {
-      showToast('Resume parsing failed. Please inspect the details below.', 'error');
+      showToast('Resume upload or analysis failed. Inspect error details below.', 'error');
     }
   };
 
@@ -69,19 +81,39 @@ export const HomePage: React.FC = () => {
             >
               {isUploading ? (
                 <div className="flex flex-col items-center gap-4 py-4">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container text-xs font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+                    <span className="text-on-surface">
+                      {uploadStage === 'uploading' && 'Stage: Uploading to Firebase Storage'}
+                      {uploadStage === 'saving' && 'Stage: Saving details to Firestore'}
+                      {uploadStage === 'analyzing' && 'Stage: Analyzing resume & ATS metrics'}
+                      {uploadStage === 'completed' && 'Stage: Completed'}
+                      {uploadStage === 'failed' && 'Stage: Upload Interrupted'}
+                    </span>
+                  </div>
+
                   <div className="w-12 h-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin"></div>
                   <div className="flex flex-col gap-1 w-full max-w-md">
                     <div className="flex justify-between text-xs font-mono font-semibold text-on-surface">
                       <span>{uploadStep}</span>
-                      <span>{uploadProgress}%</span>
+                      <span className="text-primary">{uploadProgress}%</span>
                     </div>
-                    <div className="w-full h-2 bg-surface-container rounded-full overflow-hidden">
+                    <div className="w-full h-2.5 bg-surface-container rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-primary transition-all duration-300 rounded-full"
-                        style={{ width: `${uploadProgress}%` }}
+                        className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-300 rounded-full"
+                        style={{ width: `${Math.min(Math.max(uploadProgress, 0), 100)}%` }}
                       ></div>
                     </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={cancelUpload}
+                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant hover:bg-surface-container text-xs text-on-surface-variant font-medium transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-error">cancel</span>
+                    Cancel Upload
+                  </button>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-3">
@@ -123,14 +155,50 @@ export const HomePage: React.FC = () => {
             </div>
 
             {uploadError && (
-              <div className="mt-3 p-3.5 rounded-xl bg-error/10 border border-error/25 flex items-start justify-between gap-3 text-xs text-error text-left">
-                <div className="flex items-start gap-2">
-                  <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">error</span>
-                  <span>{uploadError}</span>
+              <div className="mt-3 p-4 rounded-xl bg-error/10 border border-error/25 flex flex-col gap-3 text-xs text-left">
+                <div className="flex items-start justify-between gap-3 text-error">
+                  <div className="flex items-start gap-2">
+                    <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">error</span>
+                    <span className="font-medium leading-relaxed">{uploadError}</span>
+                  </div>
+                  <button onClick={clearUploadError} className="text-error/70 hover:text-error shrink-0">
+                    <span className="material-symbols-outlined text-[16px]">close</span>
+                  </button>
                 </div>
-                <button onClick={clearUploadError} className="text-error/70 hover:text-error shrink-0">
-                  <span className="material-symbols-outlined text-[16px]">close</span>
-                </button>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-error/15">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const success = await retryUpload();
+                      if (success) {
+                        showToast('Resume uploaded and parsed successfully!', 'success');
+                        navigate('/resume-analysis');
+                      }
+                    }}
+                    className="px-3.5 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold shadow-xs flex items-center gap-1.5 hover:bg-primary/90 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">refresh</span>
+                    Retry Upload
+                  </button>
+
+                  {lastSelectedFile && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const success = await parseLocalFileFallback();
+                        if (success) {
+                          showToast('Resume analyzed using deterministic ATS parser!', 'success');
+                          navigate('/resume-analysis');
+                        }
+                      }}
+                      className="px-3.5 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-tertiary">bolt</span>
+                      Continue with Client Analysis
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
